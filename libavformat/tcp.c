@@ -178,7 +178,7 @@ static void *tcp_getaddrinfo_worker(void *arg)
     return NULL;
 }
 
-static int tcp_getaddrinfo_async(const char *hostname, const char *servname,
+static int tcp_getaddrinfo_nonblock(const char *hostname, const char *servname,
                                  const struct addrinfo *hints, struct addrinfo **res,
                                  int64_t timeout,
                                  const AVIOInterruptCB *int_cb)
@@ -213,8 +213,6 @@ static int tcp_getaddrinfo_async(const char *hostname, const char *servname,
 
     pthread_detach(work_thread);
 
-    /* FIXME: using the monotonic clock would be better,
-       but it does not exist on all supported platforms. */
     start = av_gettime();
     now   = start;
 
@@ -223,7 +221,11 @@ static int tcp_getaddrinfo_async(const char *hostname, const char *servname,
         int64_t wait_time = now + 100000;
         struct timespec tv = { .tv_sec  =  wait_time / 1000000,
                                .tv_nsec = (wait_time % 1000000) * 1000 };
+#if HAVE_PTHREAD_COND_TIMEWAIT_MONOTONIC_NP
+        ret = pthread_cond_timedwait_monotonic_np(&req->cond, &req->mutex, &tv);
+else
         ret = pthread_cond_timedwait(&req->cond, &req->mutex, &tv);
+#endif
         if (ret == 0 || ret != ETIMEDOUT)
             break;
 
@@ -298,7 +300,7 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     if (s->listen)
         hints.ai_flags |= AI_PASSIVE;
 #ifdef HAVE_PTHREADS
-    ret = tcp_getaddrinfo_async(hostname, portstr, &hints, &ai, s->addrinfo_timeout, &h->interrupt_callback);
+    ret = tcp_getaddrinfo_nonblock(hostname, portstr, &hints, &ai, s->addrinfo_timeout, &h->interrupt_callback);
 #else
     if (s->addrinfo_timeout > 0)
         av_log(h, AV_LOG_WARNING, "Ignore addrinfo_timeout without pthreads support.\n")
