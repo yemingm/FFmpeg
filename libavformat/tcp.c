@@ -93,7 +93,11 @@ typedef struct TCPAddrinfoRequest
 
 static void tcp_getaddrinfo_request_free(TCPAddrinfoRequest *req)
 {
-    freeaddrinfo(req->res);
+    if(!req)
+        return;
+    if(req->res) {
+        freeaddrinfo(req->res);
+    }
 
     av_freep(&req->servname);
     av_freep(&req->hostname);
@@ -201,7 +205,7 @@ static int tcp_getaddrinfo_nonblock(const char *hostname, const char *servname,
         goto fail;
 
     req_ref = av_buffer_ref(req->buffer);
-    if (ret)
+    if (req_ref == NULL)
         goto fail;
 
     /* FIXME: using a thread pool would be better. */
@@ -229,8 +233,11 @@ else
         if (ret == 0 || ret != ETIMEDOUT)
             break;
 
-        if (ff_check_interrupt(&req->interrupt_callback))
-            return AVERROR_EXIT;
+        if (ff_check_interrupt(&req->interrupt_callback)) {
+            ret = AVERROR_EXIT;
+            pthread_mutex_unlock(&req->mutex);
+            goto fail;
+        }
 
         now = av_gettime();
     }
