@@ -1,0 +1,22 @@
+***************
+*** 254,259 ****
+       * ',' separated list of allowed protocols.
+       */
+      const char *protocol_whitelist;
+  } AVIOContext;
+  
+  /* unbuffered I/O */
+--- 254,266 ----
+       * ',' separated list of allowed protocols.
+       */
+      const char *protocol_whitelist;
++ 
++     /*
++      * SRS rtmp only
++      * */
++     char srs_server_ip[20];
++     int srs_pid;
++     int srs_cid;
+  } AVIOContext;
+  
+  /* unbuffered I/O */
