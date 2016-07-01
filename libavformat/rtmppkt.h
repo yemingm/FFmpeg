@@ -152,6 +152,16 @@ int ff_rtmp_packet_write(URLContext *h, RTMPPacket *p,
                          int *nb_prev_pkt);
 
 /**
+ * Print information and contents of RTMP header.
+ * Stroe to @rtmp_header
+ *
+ * @param ctx                   output context
+ * @param p                     packet to dump
+ * @param rtmp_header           store RTMP header message
+ */
+void ff_rtmp_dump_header(void *ctx, RTMPPacket *p, AVDictionary** rtmp_header);
+
+/**
  * Print information and contents of RTMP packet.
  *
  * @param ctx        output context

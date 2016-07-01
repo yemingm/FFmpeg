@@ -77,6 +77,7 @@ typedef struct TrackedMethod {
 typedef struct RTMPContext {
     const AVClass *class;
     URLContext*   stream;                     ///< TCP stream used in interactions with RTMP server
+    AVDictionary  *rtmp_header;
     RTMPPacket    *prev_pkt[2];               ///< packet history used when reading and sending packets ([0] for reading, [1] for writing)
     int           nb_prev_pkt[2];             ///< number of elements in prev_pkt
     int           in_chunk_size;              ///< size of the chunks incoming RTMP packets are divided into
@@ -2424,6 +2425,9 @@ static int get_packet(URLContext *s, int for_header)
             rt->last_bytes_read = rt->bytes_read;
         }
 
+        if (for_header) {
+            ff_rtmp_dump_header(s, &rpkt, &rt->rtmp_header);
+        }
         ret = rtmp_parse_result(s, rt, &rpkt);
 
         // At this point we must check if we are in the seek state and continue
@@ -2583,6 +2587,7 @@ static int rtmp_open(URLContext *s, const char *uri, int flags)
     uint8_t buf[2048];
     int port;
     AVDictionary *opts = NULL;
+    rt->rtmp_header = NULL;
     int ret;
 
     if (rt->listen_timeout > 0)

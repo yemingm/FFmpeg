@@ -868,6 +868,12 @@ static int64_t io_read_seek(void *opaque, int stream_index, int64_t timestamp, i
     return internal->h->prot->url_read_seek(internal->h, stream_index, timestamp, flags);
 }
 
+typedef struct RTMPContext {
+    const AVClass *class;
+    URLContext*   stream;                     ///< TCP stream used in interactions with RTMP server
+    AVDictionary  *rtmp_header;
+} RTMPContext;
+
 int ffio_fdopen(AVIOContext **s, URLContext *h)
 {
     AVIOInternal *internal = NULL;
@@ -914,6 +920,24 @@ int ffio_fdopen(AVIOContext **s, URLContext *h)
         (*s)->read_seek  = io_read_seek;
     }
     (*s)->av_class = &ff_avio_class;
+
+    if (strcmp(h->prot->name, "rtmp") == 0) {
+        RTMPContext* rtmp_header = ((RTMPContext*)h->priv_data)->rtmp_header;
+        AVDictionaryEntry *tag = NULL;
+        tag = av_dict_get(rtmp_header, "srs_server_ip", NULL, AV_DICT_IGNORE_SUFFIX);
+        if (tag) {
+            strncpy((*s)->srs_server_ip, tag->value, sizeof((*s)->srs_server_ip));
+        }
+        tag = av_dict_get(rtmp_header, "srs_pid", NULL, AV_DICT_IGNORE_SUFFIX);
+        if (tag) {
+            (*s)->srs_pid = atoi(tag->value);
+        }
+        tag = av_dict_get(rtmp_header, "srs_cid", NULL, AV_DICT_IGNORE_SUFFIX);
+        if (tag) {
+            (*s)->srs_cid = atoi(tag->value);
+        }
+    }
+
     return 0;
 fail:
     av_freep(&internal);

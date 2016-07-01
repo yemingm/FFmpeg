@@ -537,6 +537,71 @@ static const char* rtmp_packet_type(int type)
     }
 }
 
+static void amf_tag_contents_srs_server_ip(void *ctx, const uint8_t *data,
+                             const uint8_t *data_end, AVDictionary** rtmp_header)
+{
+    unsigned int size, nb = -1;
+    char buf[1024];
+    AMFDataType type;
+
+    if (data >= data_end)
+        return;
+
+    type = *data++;
+    if (type != AMF_DATA_TYPE_STRING && type != AMF_DATA_TYPE_LONG_STRING)
+        return;
+
+    if (type == AMF_DATA_TYPE_STRING) {
+        size = bytestream_get_be16(&data);
+    } else {
+        size = bytestream_get_be32(&data);
+    }
+    size = FFMIN(size, sizeof(buf) - 1);
+    memcpy(buf, data, size);
+    buf[size] = 0;
+    av_dict_set(rtmp_header, "srs_server_ip", buf, 0);
+
+    return;
+}
+
+static void amf_tag_contents_srs_pid(void *ctx, const uint8_t *data,
+                             const uint8_t *data_end, AVDictionary** rtmp_header)
+{
+    unsigned int size, nb = -1;
+    char buf[1024];
+    AMFDataType type;
+
+    if (data >= data_end)
+        return;
+
+    type = *data++;
+    if (type != AMF_DATA_TYPE_NUMBER)
+        return;
+
+    av_dict_set(rtmp_header, "srs_pid", av_d2str(av_int2double(AV_RB64(data))), 0);
+
+    return;
+}
+
+static void amf_tag_contents_srs_cid(void *ctx, const uint8_t *data,
+                             const uint8_t *data_end, AVDictionary** rtmp_header)
+{
+    unsigned int size, nb = -1;
+    char buf[1024];
+    AMFDataType type;
+
+    if (data >= data_end)
+        return;
+
+    type = *data++;
+    if (type != AMF_DATA_TYPE_NUMBER)
+        return;
+
+    av_dict_set(rtmp_header, "srs_cid", av_d2str(av_int2double(AV_RB64(data))), 0);
+
+    return;
+}
+
 static void amf_tag_contents(void *ctx, const uint8_t *data,
                              const uint8_t *data_end)
 {
@@ -605,6 +670,106 @@ static void amf_tag_contents(void *ctx, const uint8_t *data,
     default:
         return;
     }
+}
+
+static void amf_head_contents(void *ctx, const uint8_t *data,
+                             const uint8_t *data_end, AVDictionary** rtmp_header)
+{
+    unsigned int size, nb = -1;
+    char buf[1024];
+    AMFDataType type;
+    int parse_key = 1;
+
+    if (data >= data_end)
+        return;
+    switch ((type = *data++)) {
+    case AMF_DATA_TYPE_NUMBER:
+        av_log(ctx, AV_LOG_DEBUG, " number %g\n", av_int2double(AV_RB64(data)));
+        return;
+    case AMF_DATA_TYPE_BOOL:
+        av_log(ctx, AV_LOG_DEBUG, " bool %d\n", *data);
+        return;
+    case AMF_DATA_TYPE_STRING:
+    case AMF_DATA_TYPE_LONG_STRING:
+        if (type == AMF_DATA_TYPE_STRING) {
+            size = bytestream_get_be16(&data);
+        } else {
+            size = bytestream_get_be32(&data);
+        }
+        size = FFMIN(size, sizeof(buf) - 1);
+        memcpy(buf, data, size);
+        buf[size] = 0;
+        av_log(ctx, AV_LOG_DEBUG, " string '%s'\n", buf);
+        return;
+    case AMF_DATA_TYPE_NULL:
+        av_log(ctx, AV_LOG_DEBUG, " NULL\n");
+        return;
+    case AMF_DATA_TYPE_ARRAY:
+        parse_key = 0;
+    case AMF_DATA_TYPE_MIXEDARRAY:
+        nb = bytestream_get_be32(&data);
+    case AMF_DATA_TYPE_OBJECT:
+        av_log(ctx, AV_LOG_DEBUG, " {\n");
+        while (nb-- > 0 || type != AMF_DATA_TYPE_ARRAY) {
+            int t;
+            if (parse_key) {
+                size = bytestream_get_be16(&data);
+                size = FFMIN(size, sizeof(buf) - 1);
+                if (!size) {
+                    av_log(ctx, AV_LOG_DEBUG, " }\n");
+                    data++;
+                    break;
+                }
+                memcpy(buf, data, size);
+                buf[size] = 0;
+                if (size >= data_end - data)
+                    return;
+                data += size;
+                av_log(ctx, AV_LOG_DEBUG, "  %s: ", buf);
+            }
+            if (strcmp(buf, "srs_server_ip") == 0) {
+                amf_tag_contents_srs_server_ip(ctx, data, data_end, rtmp_header);
+            }
+            if (strcmp(buf, "srs_pid") == 0) {
+                amf_tag_contents_srs_pid(ctx, data, data_end, rtmp_header);
+            }
+            if (strcmp(buf, "srs_id") == 0) {
+                amf_tag_contents_srs_cid(ctx, data, data_end, rtmp_header);
+            }
+            amf_head_contents(ctx, data, data_end, rtmp_header);
+            t = ff_amf_tag_size(data, data_end);
+            if (t < 0 || t >= data_end - data)
+                return;
+            data += t;
+        }
+        return;
+    case AMF_DATA_TYPE_OBJECT_END:
+        av_log(ctx, AV_LOG_DEBUG, " }\n");
+        return;
+    default:
+        return;
+    }
+}
+void ff_rtmp_dump_header(void *ctx, RTMPPacket *p, AVDictionary** rtmp_header)
+{
+    uint8_t *src = p->data, *src_end = p->data + p->size;
+    av_log(ctx, AV_LOG_DEBUG, "RTMP packet type '%s'(%d) for channel %d, timestamp %d, extra field %d size %d\n",
+           rtmp_packet_type(p->type), p->type, p->channel_id, p->timestamp, p->extra, p->size);
+
+    if (p->type != RTMP_PT_INVOKE) {
+        return;
+    }
+
+    while (src < src_end) {
+        int sz;
+        amf_head_contents(ctx, src, src_end, rtmp_header);
+        sz = ff_amf_tag_size(src, src_end);
+        if (sz < 0)
+            break;
+        src += sz;
+    }
+
+    return;
 }
 
 void ff_rtmp_packet_dump(void *ctx, RTMPPacket *p)
